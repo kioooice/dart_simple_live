@@ -642,6 +642,11 @@ class DouyinSite implements LiveSite {
     String keyword, {
     int page = 1,
   }) async {
+    var result = await _searchLive(keyword, page: page);
+    return parseSearchRoomsResult(result);
+  }
+
+  Future<dynamic> _searchLive(String keyword, {int page = 1}) async {
     String serverUrl = "https://www.douyin.com/aweme/v1/web/live/search/";
     var uri = Uri.parse(serverUrl).replace(
       scheme: "https",
@@ -692,7 +697,7 @@ class DouyinSite implements LiveSite {
       queryParameters: {},
       header: await _getSearchHeaders(keyword),
     );
-    return parseSearchRoomsResult(result);
+    return result;
   }
 
   Future<Map<String, dynamic>> _getSearchHeaders(String keyword) async {
@@ -737,6 +742,54 @@ class DouyinSite implements LiveSite {
   }
 
   static LiveSearchRoomResult parseSearchRoomsResult(dynamic result) {
+    _checkSearchResult(result);
+
+    var liveRawData = _parseLiveRawDataList(result);
+    var items = <LiveRoomItem>[];
+    for (var itemData in liveRawData) {
+      var roomItem = LiveRoomItem(
+        roomId: itemData["owner"]?["web_rid"]?.toString() ?? "",
+        title: itemData["title"]?.toString() ?? "",
+        cover: _firstUrl(itemData["cover"]),
+        userName: itemData["owner"]?["nickname"]?.toString() ?? "",
+        online: _parseOnline(itemData),
+      );
+      if (roomItem.roomId.isNotEmpty) {
+        items.add(roomItem);
+      }
+    }
+    return LiveSearchRoomResult(
+      hasMore: _parseHasMore(result, items.length),
+      items: items,
+    );
+  }
+
+  static LiveSearchAnchorResult parseSearchAnchorsResult(dynamic result) {
+    _checkSearchResult(result);
+
+    var liveRawData = _parseLiveRawDataList(result);
+    var items = <LiveAnchorItem>[];
+    for (var itemData in liveRawData) {
+      var owner = itemData["owner"];
+      var anchorItem = LiveAnchorItem(
+        roomId: owner?["web_rid"]?.toString() ?? "",
+        avatar: _firstUrl(owner?["avatar_thumb"]).isNotEmpty
+            ? _firstUrl(owner?["avatar_thumb"])
+            : _firstUrl(itemData["cover"]),
+        userName: owner?["nickname"]?.toString() ?? "",
+        liveStatus: true,
+      );
+      if (anchorItem.roomId.isNotEmpty) {
+        items.add(anchorItem);
+      }
+    }
+    return LiveSearchAnchorResult(
+      hasMore: _parseHasMore(result, items.length),
+      items: items,
+    );
+  }
+
+  static void _checkSearchResult(dynamic result) {
     if (result == "" || result == 'blocked') {
       throw Exception("抖音直播搜索被限制，请稍后再试");
     }
@@ -753,26 +806,61 @@ class DouyinSite implements LiveSite {
       }
       throw Exception(statusMsg.isEmpty ? "抖音直播搜索失败" : statusMsg);
     }
+  }
 
-    var items = <LiveRoomItem>[];
+  static List<Map<String, dynamic>> _parseLiveRawDataList(Map result) {
+    var items = <Map<String, dynamic>>[];
     for (var item in result["data"] ?? []) {
-      var rawdata = item["lives"]?["rawdata"];
-      if (rawdata == null) {
-        continue;
-      }
-      var itemData = json.decode(rawdata.toString());
-      var roomItem = LiveRoomItem(
-        roomId: itemData["owner"]?["web_rid"]?.toString() ?? "",
-        title: itemData["title"]?.toString() ?? "",
-        cover: _firstUrl(itemData["cover"]),
-        userName: itemData["owner"]?["nickname"]?.toString() ?? "",
-        online: int.tryParse(itemData["stats"]["total_user"].toString()) ?? 0,
-      );
-      if (roomItem.roomId.isNotEmpty) {
-        items.add(roomItem);
+      var itemData = _extractLiveRawData(item);
+      if (itemData != null) {
+        items.add(itemData);
       }
     }
-    return LiveSearchRoomResult(hasMore: items.length >= 10, items: items);
+    return items;
+  }
+
+  static Map<String, dynamic>? _extractLiveRawData(dynamic item) {
+    var rawdata =
+        item?["lives"]?["rawdata"] ??
+        item?["cell_room"]?["rawdata"] ??
+        item?["cellRoom"]?["rawdata"] ??
+        item?["aweme"]?["cell_room"]?["rawdata"] ??
+        item?["aweme"]?["cellRoom"]?["rawdata"] ??
+        item?["aweme_info"]?["cell_room"]?["rawdata"] ??
+        item?["awemeInfo"]?["cellRoom"]?["rawdata"];
+    return _toMap(rawdata);
+  }
+
+  static Map<String, dynamic>? _toMap(dynamic data) {
+    if (data is Map) {
+      return Map<String, dynamic>.from(data);
+    }
+    if (data is String && data.isNotEmpty) {
+      var decoded = json.decode(data);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    }
+    return null;
+  }
+
+  static int _parseOnline(Map<String, dynamic> itemData) {
+    var value =
+        itemData["stats"]?["total_user"] ??
+        itemData["user_count"] ??
+        itemData["room_view_stats"]?["display_value"];
+    return int.tryParse(value?.toString() ?? "") ?? 0;
+  }
+
+  static bool _parseHasMore(Map result, int parsedItemCount) {
+    var hasMore = result["has_more"] ?? result["hasMore"];
+    if (hasMore is bool) {
+      return hasMore;
+    }
+    if (hasMore is num) {
+      return hasMore != 0;
+    }
+    return parsedItemCount >= 10;
   }
 
   static String _firstUrl(dynamic imageData) {
@@ -788,7 +876,8 @@ class DouyinSite implements LiveSite {
     String keyword, {
     int page = 1,
   }) async {
-    throw Exception("抖音暂不支持搜索主播，请直接搜索直播间");
+    var result = await _searchLive(keyword, page: page);
+    return parseSearchAnchorsResult(result);
   }
 
   @override

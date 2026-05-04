@@ -20,16 +20,39 @@ void main() {
               }),
             },
           },
+          {
+            'cell_room': {
+              'rawdata': json.encode({
+                'owner': {
+                  'web_rid': '987654321',
+                  'nickname': '主播B',
+                  'avatar_thumb': {
+                    'url_list': ['https://example.com/avatar.jpg'],
+                  },
+                },
+                'title': '另一场直播',
+                'cover': {
+                  'url_list': ['https://example.com/cover2.jpg'],
+                },
+                'user_count': 654,
+              }),
+            },
+          },
         ],
       });
 
       expect(result.hasMore, isFalse);
-      expect(result.items, hasLength(1));
-      expect(result.items.single.roomId, '123456789');
-      expect(result.items.single.title, '测试直播间');
-      expect(result.items.single.cover, 'https://example.com/cover.jpg');
-      expect(result.items.single.userName, '主播A');
-      expect(result.items.single.online, 321);
+      expect(result.items, hasLength(2));
+      expect(result.items.first.roomId, '123456789');
+      expect(result.items.first.title, '测试直播间');
+      expect(result.items.first.cover, 'https://example.com/cover.jpg');
+      expect(result.items.first.userName, '主播A');
+      expect(result.items.first.online, 321);
+      expect(result.items.last.roomId, '987654321');
+      expect(result.items.last.title, '另一场直播');
+      expect(result.items.last.cover, 'https://example.com/cover2.jpg');
+      expect(result.items.last.userName, '主播B');
+      expect(result.items.last.online, 654);
     });
 
     test('throws a clear error when Douyin requires login', () {
@@ -46,6 +69,37 @@ void main() {
           ),
         ),
       );
+    });
+
+    test('parses anchor items from live search data', () {
+      final result = DouyinSite.parseSearchAnchorsResult({
+        'data': [
+          {
+            'cell_room': {
+              'rawdata': json.encode({
+                'owner': {
+                  'web_rid': '987654321',
+                  'nickname': '主播B',
+                  'avatar_thumb': {
+                    'url_list': ['https://example.com/avatar.jpg'],
+                  },
+                },
+                'title': '另一场直播',
+                'cover': {
+                  'url_list': ['https://example.com/cover2.jpg'],
+                },
+              }),
+            },
+          },
+        ],
+      });
+
+      expect(result.hasMore, isFalse);
+      expect(result.items, hasLength(1));
+      expect(result.items.single.roomId, '987654321');
+      expect(result.items.single.avatar, 'https://example.com/avatar.jpg');
+      expect(result.items.single.userName, '主播B');
+      expect(result.items.single.liveStatus, isTrue);
     });
   });
 }
