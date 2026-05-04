@@ -682,60 +682,105 @@ class DouyinSite implements LiveSite {
         "webid": "7382872326016435738",
       },
     );
-    //var requlestUrl = await getAbogusUrl(uri.toString());
-    var requlestUrl = uri.toString();
-    var headResp = await HttpClient.instance.head(
-      'https://live.douyin.com',
-      header: headers,
+    var requlestUrl = DouyinSign.getAbogusUrl(
+      uri.toString(),
+      kDefaultUserAgent,
     );
-    var dyCookie = "";
-    headResp.headers["set-cookie"]?.forEach((element) {
-      var cookie = element.split(";")[0];
-      if (cookie.contains("ttwid")) {
-        dyCookie += "$cookie;";
-      }
-      if (cookie.contains("__ac_nonce")) {
-        dyCookie += "$cookie;";
-      }
-    });
 
     var result = await HttpClient.instance.getJson(
       requlestUrl,
       queryParameters: {},
-      header: {
-        "Authority": 'www.douyin.com',
-        'accept': 'application/json, text/plain, */*',
-        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'cookie': dyCookie,
-        'priority': 'u=1, i',
-        'referer':
-            'https://www.douyin.com/search/${Uri.encodeComponent(keyword)}?type=live',
-        'sec-ch-ua':
-            '"Microsoft Edge";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-origin',
-        'user-agent': kDefaultUserAgent,
-      },
+      header: await _getSearchHeaders(keyword),
     );
+    return parseSearchRoomsResult(result);
+  }
+
+  Future<Map<String, dynamic>> _getSearchHeaders(String keyword) async {
+    var searchCookie = await _getSearchCookie();
+    return {
+      "Authority": 'www.douyin.com',
+      'accept': 'application/json, text/plain, */*',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'cookie': searchCookie,
+      'priority': 'u=1, i',
+      'referer':
+          'https://www.douyin.com/search/${Uri.encodeComponent(keyword)}?type=live',
+      'sec-ch-ua':
+          '"Microsoft Edge";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': kDefaultUserAgent,
+    };
+  }
+
+  Future<String> _getSearchCookie() async {
+    if (cookie.isNotEmpty) {
+      return cookie;
+    }
+
+    var dyCookie = kDefaultCookie;
+    var headResp = await HttpClient.instance.head(
+      'https://live.douyin.com',
+      header: headers,
+    );
+    headResp.headers["set-cookie"]?.forEach((element) {
+      var cookie = element.split(";")[0];
+      if (!dyCookie.contains(cookie) &&
+          (cookie.contains("ttwid") || cookie.contains("__ac_nonce"))) {
+        dyCookie += ";$cookie";
+      }
+    });
+    return dyCookie;
+  }
+
+  static LiveSearchRoomResult parseSearchRoomsResult(dynamic result) {
     if (result == "" || result == 'blocked') {
       throw Exception("抖音直播搜索被限制，请稍后再试");
     }
+
+    if (result is! Map) {
+      throw Exception("抖音直播搜索返回格式异常");
+    }
+
+    var statusCode = asT<int?>(result["status_code"]) ?? 0;
+    var statusMsg = result["status_msg"]?.toString() ?? "";
+    if (statusCode != 0) {
+      if (statusCode == 2483 || statusMsg.contains("登录")) {
+        throw Exception("请先登录：抖音直播搜索需要在账号设置中配置完整抖音 Cookie");
+      }
+      throw Exception(statusMsg.isEmpty ? "抖音直播搜索失败" : statusMsg);
+    }
+
     var items = <LiveRoomItem>[];
     for (var item in result["data"] ?? []) {
-      var itemData = json.decode(item["lives"]["rawdata"].toString());
+      var rawdata = item["lives"]?["rawdata"];
+      if (rawdata == null) {
+        continue;
+      }
+      var itemData = json.decode(rawdata.toString());
       var roomItem = LiveRoomItem(
-        roomId: itemData["owner"]["web_rid"].toString(),
-        title: itemData["title"].toString(),
-        cover: itemData["cover"]["url_list"][0].toString(),
-        userName: itemData["owner"]["nickname"].toString(),
+        roomId: itemData["owner"]?["web_rid"]?.toString() ?? "",
+        title: itemData["title"]?.toString() ?? "",
+        cover: _firstUrl(itemData["cover"]),
+        userName: itemData["owner"]?["nickname"]?.toString() ?? "",
         online: int.tryParse(itemData["stats"]["total_user"].toString()) ?? 0,
       );
-      items.add(roomItem);
+      if (roomItem.roomId.isNotEmpty) {
+        items.add(roomItem);
+      }
     }
     return LiveSearchRoomResult(hasMore: items.length >= 10, items: items);
+  }
+
+  static String _firstUrl(dynamic imageData) {
+    var urlList = imageData?["url_list"];
+    if (urlList is List && urlList.isNotEmpty) {
+      return urlList.first.toString();
+    }
+    return "";
   }
 
   @override
